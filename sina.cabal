@@ -1,0 +1,43 @@
+cabal-version:      3.0
+name:               sina
+version:            0.1.0.0
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             LitFill
+maintainer:         marrazzy54@gmail.com
+category:           Language
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+
+common warnings
+    ghc-options: -Wall
+
+common deps
+    build-depends:    base ^>=4.22.0.0
+                    , parsec
+                    , containers
+                    , mtl
+    default-language: GHC2024
+
+library
+    import:           warnings
+    import:           deps
+    hs-source-dirs:   src
+    exposed-modules:  Sina
+
+executable sina
+    import:           warnings
+    import:           deps
+    main-is:          Main.hs
+    hs-source-dirs:   app
+    build-depends:    sina
+
+test-suite tests
+    import:           warnings
+    import:           deps
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    hs-source-dirs:   test
+    build-depends:    tasty
+                    , tasty-hunit
+                    , sina

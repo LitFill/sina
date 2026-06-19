@@ -1,0 +1,6 @@
+let id = \x -> x in
+let const = \x -> \y -> x in
+let t = \x -> \y -> x in
+let f = \x -> \y -> y in
+let not = \b -> b f t in
+(not t 42 0) + 1
