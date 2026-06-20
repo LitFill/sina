@@ -31,7 +31,17 @@ data Expr
     deriving (Eq, Show)
 
 
-data Oper = Add | Sub deriving (Eq, Show)
+data Oper
+    = Add
+    | Sub
+    | Mul
+    | Div
+    | BEq
+    | BLt
+    | BGt
+    | BLe
+    | BGe
+    deriving (Eq, Show)
 
 
 newtype TVar = TV Name deriving (Eq, Ord, Show)
@@ -76,11 +86,23 @@ identifier = try $ do
         then fail $ "reserved word " ++ show name
         else name <$ ws
 
+
 operTable :: OperatorTable String () Identity Expr
 operTable =
     [
+        [ Infix (spaces *> char '*' <* spaces >> return (EBin Mul)) AssocLeft
+        , Infix (spaces *> char '/' <* spaces >> return (EBin Div)) AssocLeft
+        ]
+    ,
         [ Infix (spaces *> char '+' <* spaces >> return (EBin Add)) AssocLeft
         , Infix (spaces *> char '-' <* spaces >> return (EBin Sub)) AssocLeft
+        ]
+    ,
+        [ Infix (spaces *> string "==" <* spaces >> return (EBin BEq)) AssocNone
+        , Infix (spaces *> string "<=" <* spaces >> return (EBin BLe)) AssocNone
+        , Infix (spaces *> string ">=" <* spaces >> return (EBin BGe)) AssocNone
+        , Infix (spaces *> char '<' <* spaces >> return (EBin BLt)) AssocNone
+        , Infix (spaces *> char '>' <* spaces >> return (EBin BGt)) AssocNone
         ]
     ]
 
@@ -142,15 +164,9 @@ parseLit =
         <|> (EVar <$> identifier)
 
 
---------------
---- Runner ---
---------------
-
-mapLeft :: (l -> l') -> Either l r -> Either l' r
-mapLeft f = \case
-    Left l -> Left $ f l
-    Right r -> Right r
-
+--------------------
+--- Type Checker ---
+--------------------
 
 data Scheme = Forall (Set.Set TVar) Type
 
@@ -213,83 +229,6 @@ instance (Substitutable a) => Substitutable [a] where
     apply s = map (apply s)
 
 
-------------------
---- Pretty Print ---
-------------------
-
-ppType :: Type -> String
-ppType = \case
-    TVar (TV n) -> "?" <> n
-    TCon "->" [a, b] -> ppArrow a b
-    TCon n [] -> n
-    TCon n ts -> n <> " " <> unwords (map ppParenType ts)
-
-
-ppParenType :: Type -> String
-ppParenType t@(TCon "->" _) = "(" <> ppType t <> ")"
-ppParenType t = ppType t
-
-
-ppArrow :: Type -> Type -> String
-ppArrow a b = ppParenType a <> " -> " <> ppType b
-
-
-ppScheme :: Scheme -> String
-ppScheme (Forall vs t)
-    | Set.null vs = ppType t
-    | otherwise =
-        "forall " <> unwords (map (\(TV n) -> n) (Set.toList vs)) <> ". " <> ppType t
-
-
-ppConstraint :: Constraint -> String
-ppConstraint (Constraint a b) = ppType a <> " ~ " <> ppType b
-
-
-ppSubst :: Subst -> String
-ppSubst s
-    | Map.null s = "{}"
-    | otherwise =
-        "{ "
-            <> intercalate
-                ", "
-                [show (TV n) <> " |-> " <> ppType t | (TV n, t) <- Map.toList s]
-            <> " }"
-
-
-ppExpr :: Expr -> String
-ppExpr = \case
-    EInt n -> show n
-    EBool True -> "True"
-    EBool False -> "False"
-    EVar v -> v
-    EAbs p b -> "\\" <> p <> " -> " <> ppExpr b
-    EApp f a -> ppApp f <> " " <> ppAtom a
-    EBin op a b -> ppAtom a <> " " <> ppOper op <> " " <> ppAtom b
-    EIf c a b -> "if " <> ppExpr c <> " then " <> ppExpr a <> " else " <> ppExpr b
-    ELet v e b -> "let " <> v <> " = " <> ppExpr e <> " in " <> ppExpr b
-
-
-ppAtom :: Expr -> String
-ppAtom e@(EVar _) = ppExpr e
-ppAtom e@(EInt _) = ppExpr e
-ppAtom e@(EBool _) = ppExpr e
-ppAtom e@(EAbs _ _) = "(" <> ppExpr e <> ")"
-ppAtom e@(EApp _ _) = "(" <> ppExpr e <> ")"
-ppAtom e@EBin {} = "(" <> ppExpr e <> ")"
-ppAtom e@EIf {} = "(" <> ppExpr e <> ")"
-ppAtom e@ELet {} = "(" <> ppExpr e <> ")"
-
-
-ppApp :: Expr -> String
-ppApp e@(EApp _ _) = ppExpr e
-ppApp e = ppAtom e
-
-
-ppOper :: Oper -> String
-ppOper Add = "+"
-ppOper Sub = "-"
-
-
 compose :: Subst -> Subst -> Subst
 compose a b = Map.map (apply a) (b `u` a)
   where
@@ -340,8 +279,15 @@ infer = \case
         bt <- infer b
         t <- fresh
         case o of
-            Add -> constrain (TInt :-> (TInt :-> TInt)) (at :-> (bt :-> t))
-            Sub -> constrain (TInt :-> (TInt :-> TInt)) (at :-> (bt :-> t))
+            Add
+            Sub
+            Mul
+            Div -> constrain (TInt :-> TInt :-> TInt) (at :-> bt :-> t)
+            BEq
+            BLt
+            BGt
+            BLe
+            BGe -> constrain (at :-> bt :-> TBool) (at :-> bt :-> t)
         return t
     ELet v e b -> do
         et <- infer e
@@ -360,8 +306,9 @@ unify = \cases
     t (TVar v) -> bind v t
     (TCon n1 ts1) (TCon n2 ts2)
         | n1 /= n2 ->
-            throwError $
-                concat ["Type mismatch ", show (TCon n1 ts1), " and ", show (TCon n2 ts2)]
+            throwError
+                . concat
+                $ ["Type mismatch ", show (TCon n1 ts1), " and ", show (TCon n2 ts2)]
         | otherwise -> unifyMany ts1 ts2
   where
     unifyMany = \cases
@@ -388,6 +335,100 @@ solve = \cases
         s1 <- unify t1 t2
         solve (s1 `compose` s) (apply s1 cs)
 
+
+--------------------
+--- Pretty Print ---
+--------------------
+
+ppType :: Type -> String
+ppType = \case
+    TVar (TV n) -> "?" <> n
+    TCon "->" [a, b] -> ppArrow a b
+    TCon n [] -> n
+    TCon n ts -> n <> " " <> unwords (map ppParenType ts)
+
+
+ppParenType :: Type -> String
+ppParenType t@(TCon "->" _) = "(" <> ppType t <> ")"
+ppParenType t = ppType t
+
+
+ppArrow :: Type -> Type -> String
+ppArrow a b = ppParenType a <> " -> " <> ppType b
+
+
+ppScheme :: Scheme -> String
+ppScheme (Forall vs t)
+    | Set.null vs = ppType t
+    | otherwise =
+        "∀ " <> unwords (map (\(TV n) -> n) (Set.toList vs)) <> ". " <> ppType t
+
+
+ppConstraint :: Constraint -> String
+ppConstraint (Constraint a b) = ppType a <> " ~ " <> ppType b
+
+
+ppSubst :: Subst -> String
+ppSubst s
+    | Map.null s = "{}"
+    | otherwise =
+        betweens "{ " " }"
+            . intercalate ", "
+            $ [ show (TV n) <> " |-> " <> ppType t
+              | (TV n, t) <- Map.toList s
+              ]
+
+
+betweens :: String -> String -> String -> String
+betweens o e t = o <> t <> e
+
+
+ppExpr :: Expr -> String
+ppExpr = \case
+    EInt n -> show n
+    EBool True -> "True"
+    EBool False -> "False"
+    EVar v -> v
+    EAbs p b -> "\\" <> p <> " -> " <> ppExpr b
+    EApp f a -> ppApp f <> " " <> ppAtom a
+    EBin op a b -> ppAtom a <> " " <> ppOper op <> " " <> ppAtom b
+    EIf c a b -> "if " <> ppExpr c <> " then " <> ppExpr a <> " else " <> ppExpr b
+    ELet v e b -> "let " <> v <> " = " <> ppExpr e <> " in " <> ppExpr b
+
+
+ppAtom :: Expr -> String
+ppAtom = \case
+    e@EVar {} -> ppExpr e
+    e@EInt {} -> ppExpr e
+    e@EBool {} -> ppExpr e
+    e@EAbs {} -> betweens "(" ")" $ ppExpr e
+    e@EApp {} -> betweens "(" ")" $ ppExpr e
+    e@EBin {} -> betweens "(" ")" $ ppExpr e
+    e@EIf {} -> betweens "(" ")" $ ppExpr e
+    e@ELet {} -> betweens "(" ")" $ ppExpr e
+
+
+ppApp :: Expr -> String
+ppApp e@EApp {} = ppExpr e
+ppApp e = ppAtom e
+
+
+ppOper :: Oper -> String
+ppOper = \case
+    Add -> "+"
+    Sub -> "-"
+    Mul -> "*"
+    Div -> "/"
+    BEq -> "=="
+    BLt -> "<"
+    BGt -> ">"
+    BLe -> "<="
+    BGe -> ">="
+
+
+--------------
+--- Runner ---
+--------------
 
 runSolve :: [Constraint] -> Either String Subst
 runSolve = runExcept . solve Map.empty
