@@ -49,6 +49,7 @@ pattern TBool :: Type
 pattern TBool = TCon "Bool" []
 
 
+infixr 2 :->
 pattern (:->) :: Type -> Type -> Type
 pattern a :-> b = TCon "->" [a, b]
 
