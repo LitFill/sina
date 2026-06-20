@@ -98,9 +98,9 @@ operTable =
         , Infix (spaces *> char '-' <* spaces >> return (EBin Sub)) AssocLeft
         ]
     ,
-        [ Infix (spaces *> string "==" <* spaces >> return (EBin BEq)) AssocNone
-        , Infix (spaces *> string "<=" <* spaces >> return (EBin BLe)) AssocNone
-        , Infix (spaces *> string ">=" <* spaces >> return (EBin BGe)) AssocNone
+        [ Infix (spaces *> try (string "<=") <* spaces >> return (EBin BLe)) AssocNone
+        , Infix (spaces *> try (string ">=") <* spaces >> return (EBin BGe)) AssocNone
+        , Infix (spaces *> try (string "==") <* spaces >> return (EBin BEq)) AssocNone
         , Infix (spaces *> char '<' <* spaces >> return (EBin BLt)) AssocNone
         , Infix (spaces *> char '>' <* spaces >> return (EBin BGt)) AssocNone
         ]
