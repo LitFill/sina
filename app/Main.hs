@@ -15,6 +15,7 @@ main = do
     hParse :: Expr -> IO ()
     hParse expr = do
         putStrLn $ "Parsed: " <> ppExpr expr
+        putStrLn $ "AST: " <> show expr
         hInfer expr
 
     hInfer =
