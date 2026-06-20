@@ -1,16 +1,36 @@
 module Main (main) where
 
 import Control.Arrow ((>>>))
+import System.Environment (getArgs)
 import Text.Parsec (parse)
 
 import Sina
 
 
 main :: IO ()
-main = do
-    let inputFile = "sample.sina"
-    input <- readFile inputFile
-    either print hParse $ parse parseExpr inputFile input
+main = getArgs >>= hArgs
+
+
+hArgs :: [String] -> IO ()
+hArgs = \case
+    ("file" : fname : _) -> do
+        input <- readFile fname
+        pipeline fname input
+    ("expr" : expr : _) -> pipeline "stdin" expr
+    _ ->
+        mapM_
+            putStrLn
+            [ "Usage: <command> [args]"
+            , ""
+            , "avaible commands:"
+            , "- file PATH\t  parse and tc a file"
+            , "- expr EXPR\t  parse and tc a string arg"
+            ]
+
+
+pipeline :: String -> String -> IO ()
+pipeline fileName str =
+    either print hParse $ parse parseExpr fileName str
   where
     hParse :: Expr -> IO ()
     hParse expr = do
